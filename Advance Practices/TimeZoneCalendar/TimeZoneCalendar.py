@@ -67,6 +67,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Events storage: {QDate: [{'start_time': QTime, 'end_time': QTime, 'timezone': str}, ...]}
         self.events = {}
 
+        # Database file path
+        self.db_file = "calendar_events.json"
+
+        # Load existing events
+        self.load_events()
+
         # Setup table
         self.setup_table()
         self.update_calendar()
@@ -75,11 +81,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.pushButton.clicked.connect(self.prev_month)
         self.pushButton_2.clicked.connect(self.next_month)
 
-        # Make timezone label clickable
+        # Make timezone label clickable with hover effects
         self.label_2.mousePressEvent = self.change_timezone
         self.label_2.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.label_2.setStyleSheet(self.label_2.styleSheet(
-        ) + "\nQLabel:hover { text-decoration: underline; }")
+        self.label_2.setProperty("hovered", False)
+        self.label_2.enterEvent = lambda e: self.on_tz_label_hover(True)
+        self.label_2.leaveEvent = lambda e: self.on_tz_label_hover(False)
+        self.update_timezone_colors()
 
         # Connect table cell clicks
         self.tableWidget.cellClicked.connect(self.cell_clicked)
@@ -118,22 +126,177 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Show grid lines
         self.tableWidget.setShowGrid(True)
 
-        # Add custom header styling with consistent borders
-        self.tableWidget.setStyleSheet("""
-            QHeaderView::section {
-                background-color: #5170ff;
+        # Enable mouse tracking for hover effects
+        self.tableWidget.setMouseTracking(True)
+        self.tableWidget.viewport().setMouseTracking(True)
+        self.tableWidget.cellEntered.connect(self.on_cell_hover)
+
+        # Will be updated by update_timezone_colors()
+        self.update_table_style()
+
+    def update_table_style(self):
+        """Update table stylesheet based on current timezone"""
+        current_tz = self.get_current_timezone()
+
+        if current_tz == 'PHT':
+            header_color = '#5170ff'  # Blue
+        else:  # EDT
+            header_color = '#ff69b4'  # Pink
+
+        self.tableWidget.setStyleSheet(f"""
+            QHeaderView::section {{
+                background-color: {header_color};
                 color: white;
                 font-weight: bold;
                 padding: 4px;
-            }
-            QTableWidget {
+            }}
+            QTableWidget {{
                 gridline-color: #808080;
-            }
+            }}
         """)
 
     def get_current_timezone(self):
         """Get the currently selected timezone"""
         return self.timezones[self.current_tz_index]
+
+    def update_timezone_colors(self):
+        """Update colors based on current timezone"""
+        current_tz = self.get_current_timezone()
+
+        if current_tz == 'PHT':
+            header_bg = '#5170ff'  # Blue
+            button_bg = '#5170ff'
+        else:  # EDT
+            header_bg = '#ff69b4'  # Pink
+            button_bg = '#ff69b4'
+
+        # Update header widget (contains timezone, month, year)
+        self.horizontalWidget.setStyleSheet(f"""
+            background-color: {header_bg};
+            border-radius: 25px;
+        """)
+
+        # Update month navigation buttons
+        self.pushButton.setStyleSheet(f"""
+            background-color: {button_bg};
+            color: white;
+            font-weight: bold;
+            border: none;
+            font-size: 16px;
+        """)
+        self.pushButton_2.setStyleSheet(f"""
+            background-color: {button_bg};
+            color: white;
+            font-weight: bold;
+            border: none;
+            font-size: 16px;
+        """)
+
+        # Update timezone label styling
+        base_style = """
+            color: white;
+            font-weight: bold;
+        """
+        self.label_2.setStyleSheet(base_style)
+
+        # Update table header colors
+        self.update_table_style()
+
+    def on_tz_label_hover(self, is_hovering):
+        """Handle hover effect on timezone label"""
+        if is_hovering:
+            # Scale up slightly and change cursor
+            font = self.label_2.font()
+            font.setPointSize(16)  # Slightly larger
+            self.label_2.setFont(font)
+        else:
+            # Return to normal size
+            font = self.label_2.font()
+            font.setPointSize(14)
+            self.label_2.setFont(font)
+
+    def on_cell_hover(self, row, col):
+        """Handle hover effect on table cells"""
+        # Darken the hovered cell
+        item = self.tableWidget.item(row, col)
+        if item and item.data(Qt.ItemDataRole.UserRole):
+            # Store original color if not already stored
+            if not item.data(Qt.ItemDataRole.UserRole + 1):
+                original_color = item.background().color()
+                item.setData(Qt.ItemDataRole.UserRole + 1, original_color)
+
+            # Darken the color
+            original = item.data(Qt.ItemDataRole.UserRole + 1)
+            darker = original.darker(110)
+            item.setBackground(darker)
+
+        # Reset all other cells to their original color
+        for r in range(self.tableWidget.rowCount()):
+            for c in range(self.tableWidget.columnCount()):
+                if r != row or c != col:
+                    cell_item = self.tableWidget.item(r, c)
+                    if cell_item:
+                        original_color = cell_item.data(
+                            Qt.ItemDataRole.UserRole + 1)
+                        if original_color:
+                            cell_item.setBackground(original_color)
+
+    def load_events(self):
+        """Load events from JSON file"""
+        if not os.path.exists(self.db_file):
+            return
+
+        try:
+            with open(self.db_file, 'r') as f:
+                data = json.load(f)
+
+            # Convert JSON data back to QDate and QTime objects
+            for date_str, event_list in data.items():
+                date = QDate.fromString(date_str, "yyyy-MM-dd")
+                self.events[date] = []
+
+                for event in event_list:
+                    start_time = QTime.fromString(
+                        event['start_time'], "hh:mm:ss")
+                    end_time = QTime.fromString(event['end_time'], "hh:mm:ss")
+
+                    self.events[date].append({
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'timezone': event['timezone']
+                    })
+
+            print(
+                f"Loaded {len(self.events)} date(s) with events from database")
+        except Exception as e:
+            print(f"Error loading events: {e}")
+            QMessageBox.warning(self, "Load Error",
+                                f"Could not load saved events: {e}")
+
+    def save_events(self):
+        """Save events to JSON file"""
+        try:
+            # Convert QDate and QTime objects to strings for JSON
+            data = {}
+            for date, event_list in self.events.items():
+                date_str = date.toString("yyyy-MM-dd")
+                data[date_str] = []
+
+                for event in event_list:
+                    data[date_str].append({
+                        'start_time': event['start_time'].toString("hh:mm:ss"),
+                        'end_time': event['end_time'].toString("hh:mm:ss"),
+                        'timezone': event['timezone']
+                    })
+
+            with open(self.db_file, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            print(f"Saved {len(self.events)} date(s) with events to database")
+        except Exception as e:
+            print(f"Error saving events: {e}")
+            QMessageBox.warning(self, "Save Error",
+                                f"Could not save events: {e}")
 
     def update_calendar(self):
         """Populate the calendar with dates"""
@@ -182,8 +345,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     item.setData(Qt.ItemDataRole.UserRole, date)
 
                     # Default styling for all cells - IMPORTANT: Set background!
-                    item.setBackground(QColor("#E7E7E7"))
+                    base_color = QColor("#E7E7E7")
+                    item.setBackground(base_color)
                     item.setForeground(QColor("#000000"))
+
+                    # Store original color for hover effects
+                    item.setData(Qt.ItemDataRole.UserRole + 1, base_color)
 
                     # Highlight if has events
                     if display_events:
@@ -363,6 +530,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     'timezone': current_tz
                 })
 
+            self.save_events()  # Save after adding to multiple dates
             self.update_calendar()
 
             # Show confirmation
@@ -388,6 +556,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 'timezone': self.get_current_timezone()
             })
 
+            self.save_events()  # Save after adding
             self.update_calendar()
 
     def delete_event(self, date, display_events):
@@ -436,14 +605,29 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     if not self.events[original_date]:
                         del self.events[original_date]
 
+                self.save_events()  # Save after deleting
                 self.update_calendar()
                 break
 
     def change_timezone(self, event):
         """Switch between timezones"""
+        # Make text slightly darker on click
+        self.label_2.setStyleSheet("""
+            color: #cccccc;
+            font-weight: bold;
+        """)
+
+        # Switch timezone
         self.current_tz_index = (
             self.current_tz_index + 1) % len(self.timezones)
+
+        # Update all colors
+        self.update_timezone_colors()
         self.update_calendar()
+
+        # Reset text color after a brief moment
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.update_timezone_colors())
 
     def prev_month(self):
         """Navigate to previous month"""
