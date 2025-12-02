@@ -1,1 +1,4 @@
-Intermediate\ Practices/bank/venv
+**/venv/
+**/.venv/
+**/env/
+**/.env/

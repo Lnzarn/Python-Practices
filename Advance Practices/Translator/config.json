@@ -1,0 +1,10 @@
+{
+    "dictionary_path": "dictionary.json",
+    "input_file": "input_novel.txt",
+    "output_file": "translated_novel.txt",
+    "deepl_wait_time": 20,
+    "qwen_wait_time": 110,
+    "deepl_chunk_size": 1450,
+    "human_delay_min": 15,
+    "human_delay_max": 33
+}
